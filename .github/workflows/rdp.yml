@@ -3,18 +3,18 @@ name: RDP by DucThang x TrueHieu (V7 - Chốt Hạ Tuyệt Đối)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */1 * * *" # Tự động khởi động lại sau mỗi 1 giờ
+    - cron: "0 */1 * * *" # Kích hoạt phiên mới mỗi 1 giờ
 
 concurrency:
   group: vps-bore-runner
-  cancel-in-progress: true # Tự động ngắt phiên chạy cũ để dọn RAM khi phiên mới chạy
+  cancel-in-progress: true # Tự động hủy phiên cũ, giải phóng RAM khi phiên mới chạy
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
       contents: write
-    timeout-minutes: 1440
+    timeout-minutes: 360 # Giới hạn tối đa của GitHub runner
 
     steps:
       - name: Checkout Repository
@@ -40,7 +40,6 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "🚀 Đang khởi chạy Google Chrome chuẩn tham số..."
-          # Sửa lỗi bọc chuỗi ArgumentList để Chrome nhận diện chính xác tham số
           Start-Process "chrome.exe" -ArgumentList "--kiosk","https://tinyurl.com/5xecsrmj","--no-first-run" -WindowStyle Normal -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
 
@@ -57,7 +56,6 @@ jobs:
           $USER = "admin"
           $lastFullAddress = ""
           
-          # Cấu hình Git bắt buộc
           git config --global user.name "TrueHieu-Bot"
           git config --global user.email "bot@trueteam.top"
           git config --global core.autocrlf false
@@ -70,7 +68,6 @@ jobs:
           $psi.RedirectStandardOutput = $true
           $process = [System.Diagnostics.Process]::Start($psi)
           
-          # Khởi chạy một luồng đọc log song song và ghi đè file rdp_info.txt một lần duy nhất khi nhận được port
           while (!$process.HasExited) {
               $line = $process.StandardOutput.ReadLine()
               if ($line) { Write-Host "[bore] $line" }
@@ -99,7 +96,6 @@ jobs:
                       $report = ($reportLines -join "`r`n")
                       [System.IO.File]::WriteAllText("$(Get-Location)\rdp_info.txt", $report)
                       
-                      # Ép buộc đồng bộ hóa với nhánh từ xa trước khi Push để tránh kẹt log
                       git fetch origin main
                       git stash
                       git checkout main
@@ -111,19 +107,26 @@ jobs:
                       git push origin main --force
                       
                       Write-Host "✅ ĐÃ ÉP CẬP NHẬT REPO THÀNH CÔNG: $fullAddress"
-                      Write-Host "⏳ Bắt đầu chuyển sang chế độ lặp giữ live VPS..."
-                      break # Thoát khỏi luồng đọc log để chuyển sang vòng lặp giữ live vô hạn
+                      break
                   }
               }
               Start-Sleep -Milliseconds 200
           }
           
-          # ⚙️ ĐÃ TỐI ƯU: Hạ số vòng lặp xuống 50 (50 phút) để vừa khít với chu kỳ Cron 1 giờ mới
-          Write-Host "🔒 Khóa luồng giữ live đang hoạt động. Chu kỳ Cron 1 tiếng sẽ tự dọn dẹp phiên chạy này..."
-          for ($i = 0; $i -lt 50; $i++) {
+          # ⚙️ ĐÃ TỐI ƯU THÀNH VÒNG LẶP VÔ HẠN (Kèm Ping Giữ Live)
+          Write-Host "🔒 Chuyển sang chế độ lặp vô hạn. Phiên chạy này sẽ CHỈ DỪNG khi phiên Cron mới xuất hiện và kích hoạt Concurrency..."
+          $loopCount = 0
+          while ($true) {
               if ($process.HasExited) {
                   Write-Host "⚠️ Phát hiện tiến trình Bore đã bị đóng ngầm! Đang khởi động lại tiến trình..."
                   $process = [System.Diagnostics.Process]::Start($psi)
               }
+              
+              # Cứ sau 10 phút (600s), tạo một log hoạt động nhỏ để tránh GitHub hủy vì không có output (Inactivity Timeout)
+              if ($loopCount % 10 -eq 0) {
+                  Write-Host "💓 Heartbeat check - VPS vẫn đang hoạt động ổn định. Đã chạy được $loopCount phút."
+              }
+              
               Start-Sleep -Seconds 60
+              $loopCount++
           }
